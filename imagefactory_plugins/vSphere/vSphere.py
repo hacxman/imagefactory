@@ -34,6 +34,8 @@ from VSphereHelper import VSphereHelper
 from VMDKstream import convert_to_stream
 from imgfac.CloudDelegate import CloudDelegate
 
+from OVF import OVF
+
 rhel5_module_script='''echo "alias scsi_hostadapter2 mptbase" >> /etc/modprobe.conf
 echo "alias scsi_hostadapter3 mptspi" >> /etc/modprobe.conf
 KERNEL=`grubby --default-kernel`
@@ -155,6 +157,16 @@ class vSphere(object):
         self.log.info("Transforming image for use on VMWare")
         self.vmware_transform_image()
 
+
+        self.log.debug("@@@@WILL %s" % template)
+        ovf = OVF()
+        ovf.add_image(self.image, [self.image])
+        ovf.tpl_uuid = image_id
+        ovf.ovf_desc = 'this file will self destroy the universe'
+        ovf.vol_uuid = ''
+        ovf.ovf_name = 'lold'
+        ovf.save_as("/tmp/kokot.ovf")
+
         self.percent_complete=100
         self.status="COMPLETED"
 
@@ -171,7 +183,7 @@ class vSphere(object):
 
     def modify_oz_filesystem(self):
         self.log.debug("Doing further Factory specific modification of Oz image")
-        guestfs_handle = launch_inspect_and_mount(builder.target_image.data)
+        guestfs_handle = launch_inspect_and_mount(self.builder.target_image.data)
         remove_net_persist(guestfs_handle)
         create_cloud_info(guestfs_handle, self.target)
         shutdown_and_close(guestfs_handle)
