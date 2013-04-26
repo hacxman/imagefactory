@@ -31,6 +31,7 @@ from imgfac.ReservationManager import ReservationManager
 from imgfac.FactoryUtils import launch_inspect_and_mount, shutdown_and_close, remove_net_persist
 
 from imgfac.OSDelegate import OSDelegate
+from imgfac.SlaveImage import SlaveImage
 
 def subprocess_check_output(*popenargs, **kwargs):
     if 'stdout' in kwargs:
@@ -69,6 +70,12 @@ class FedoraOS(object):
         self.log.debug("Copying base_image file (%s) to new target_image file (%s)" % (builder.base_image.data, builder.target_image.data))
         oz.ozutil.copyfile_sparse(builder.base_image.data, builder.target_image.data)
         self.image = builder.target_image.data
+        map(lambda (x, y): oz.ozutil.copyfile_sparse(
+                builder.pim.image_with_id(x).data,
+                builder.pim.image_with_id(y).data),
+            zip(self.base_image.slaves, builder.target_image.slaves))
+
+        self.log.debug("ZIPPED SLAVES: '%s'", str(zip(self.base_image.slaves, builder.target_image.slaves)))
 
         # Merge together any TDL-style customizations requested via our plugin-to-plugin interface
         # with any target specific packages, repos and commands and then run a second Oz customization
@@ -271,7 +278,11 @@ class FedoraOS(object):
         self._init_oz()
 
         self.guest.diskimage = self.base_image.data
+        self.log.info("guest.diskimage = '%s'" % (self.guest.diskimage))
         # The remainder comes from the original build_upload(self, build_id)
+
+        slaves = {name: SlaveImage(name=name) for name in self.tdlobj.disks}
+        map(self.base_image.add_slave, slaves.values())
 
         self.status="BUILDING"
         try:
@@ -284,9 +295,15 @@ class FedoraOS(object):
             # We want to save this later for use by RHEV-M and Condor clouds
             libvirt_xml=""
 
+            map(builder.pim.add_image, slaves.values())
+            slvs = {name: (slaves[name].identifier, slaves[name].data) for name in slaves}
+            map(lambda x: self.log.info('SLAVEIMAGE.data = "%s"' % (x.data)), slaves.values())
             try:
                 self.activity("Generating JEOS disk image")
                 self.guest.generate_diskimage()
+
+                self.activity("Generating Slave disk images")
+                self.guest.generate_slave_images(slvs)
                 # TODO: If we already have a base install reuse it
                 #  subject to some rules about updates to underlying repo
                 self.activity("Execute JEOS install")
@@ -298,6 +315,7 @@ class FedoraOS(object):
                 self.output_descriptor = self.guest.customize_and_generate_icicle(libvirt_xml)
                 self.log.debug("Customization and ICICLE generation complete")
                 self.percent_complete = 50
+                map(builder.pim.save_image, slaves.values())
             finally:
                 self.activity("Cleaning up install artifacts")
                 self.guest.cleanup_install()
